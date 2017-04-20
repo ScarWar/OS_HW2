@@ -15,7 +15,6 @@
 #define END_DELIMITER ">>>>>>>>"
 #define ZERO_DELIMITER "00000000"
 #define _FILE_OFFSET_BITS 64
-#define DEFAULT_TIME time(NULL)
 #define max(s, t) ((s) > (t)) ? (s) : (t)
 #define min(s, t) ((s) < (t)) ? (s) : (t)
 #define K (1024)
@@ -63,74 +62,6 @@ typedef struct vault_t {
 } Vault;
 
 
-FileMetaData *createFileMetaData() {
-    FileMetaData *fileMetaData = malloc(sizeof(FileMetaData));
-    if (fileMetaData == NULL) {
-        // TODO error message
-        return NULL;
-    }
-    fileMetaData->vaultSize = 0;
-    fileMetaData->creationTime = time(0);
-    fileMetaData->lastModificationTime = fileMetaData->creationTime;
-    fileMetaData->numberOfFiles = 0;
-    return fileMetaData;
-}
-
-int destroyFileMetaData(FileMetaData *fileMetaData) {
-    if (fileMetaData == NULL) {
-        // TODO error message
-        return 0;
-    }
-    free(fileMetaData);
-    return 1;
-}
-
-DataBlock *createDataBlock() {
-    DataBlock *dataBlock = malloc(sizeof(DataBlock));
-    if (dataBlock == NULL) {
-        // TODO error message
-        return 0;
-    }
-    dataBlock->dataBlockSize = 0;
-    dataBlock->dataBlockOffset = 0;
-    return dataBlock;
-}
-
-int destroyDataBlock(DataBlock *dataBlock) {
-    if (dataBlock == NULL) {
-        // TODO error message
-        return 0;
-    }
-    free(dataBlock);
-    return 1;
-}
-
-Gaps *createGaps() {
-    Gaps *gaps = malloc(sizeof(Gaps));
-    if (gaps == NULL) {
-        // TODO error message
-        return 0;
-    }
-    return gaps;
-}
-
-int destroyGaps(Gaps *gaps) {
-    if (gaps == NULL) {
-        // TODO error message
-        return 0;
-    }
-    free(gaps);
-    return 1;
-}
-
-short getNumberOfFiles(FileMetaData *fileMetaData) {
-    if (fileMetaData == NULL) {
-        // TODO error message
-        return -1;
-    }
-    return fileMetaData->numberOfFiles;
-}
-
 ssize_t init(int vfd, long dataSize) {
     ssize_t written;
     off_t offset;
@@ -176,20 +107,6 @@ ssize_t init(int vfd, long dataSize) {
         return 0;
     }
 
-//    written = write(vfd, vault->fileMetaData, sizeof(FileMetaData));
-//    if (written != sizeof(FileMetaData)) {
-//        // TODO error message
-//        return 0;
-//    }
-//
-//    written = write(vfd, vault->gaps, sizeof(Gaps));
-//    if (written != sizeof(Gaps)) {
-//        // TODO error message
-//        return 0;
-//    }
-//
-//    destroyFileMetaData(vault->fileMetaData);
-//    destroyGaps(vault->gaps);
     free(vault);
     return written;
 }
@@ -333,7 +250,8 @@ int sortIndexByOffset(Gaps *gap, int *blockIndexes, int numberOfIndexes) {
 
     for (i = 0; i < numberOfIndexes; ++i) {
         for (j = 0; j < i; j++) {
-            if (gap->gapBlocks[blockIndexes[j + 1]].dataBlockOffset < gap->gapBlocks[blockIndexes[j]].dataBlockOffset) {
+            if (gap->gapBlocks[blockIndexes[j + 1]].dataBlockOffset <
+                gap->gapBlocks[blockIndexes[j]].dataBlockOffset) {
                 tmp = blockIndexes[j];
                 blockIndexes[j] = blockIndexes[j + 1];
                 blockIndexes[j + 1] = tmp;
@@ -399,7 +317,7 @@ short findGaps(int blockIndexes[], ssize_t blockSizes[], Gaps *gaps, ssize_t fil
     }
 
     blockIndexes[0] = index;
-    blockSizes[0] = min(gaps->gapBlocks[index].dataBlockSize, fileSize + 16);
+    blockSizes[0] = min(gaps->gapBlocks[index].dataBlockSize, fileSize + FILE_DELIMITER_SIZE);
     if (tmpFileSize + FILE_DELIMITER_SIZE <= 0)
         return 1;
 
@@ -415,7 +333,9 @@ short findGaps(int blockIndexes[], ssize_t blockSizes[], Gaps *gaps, ssize_t fil
         return -1;
     }
     blockSizes[0] = gaps->gapBlocks[blockIndexes[0]].dataBlockSize;
-    blockSizes[1] = min(gaps->gapBlocks[blockIndexes[1]].dataBlockSize, fileSize - blockSizes[0] + 16);
+    blockSizes[1] = min(gaps->gapBlocks[blockIndexes[1]].dataBlockSize, fileSize -
+                                                                        blockSizes[0] +
+                                                                        FILE_DELIMITER_SIZE);
     if (tmpFileSize + 2 * FILE_DELIMITER_SIZE <= 0)
         return 2;
 
@@ -433,7 +353,10 @@ short findGaps(int blockIndexes[], ssize_t blockSizes[], Gaps *gaps, ssize_t fil
     }
     blockSizes[0] = gaps->gapBlocks[blockIndexes[0]].dataBlockSize;
     blockSizes[1] = gaps->gapBlocks[blockIndexes[1]].dataBlockSize;
-    blockSizes[2] = min(gaps->gapBlocks[blockIndexes[1]].dataBlockSize, fileSize - blockSizes[1] - blockSizes[0]);
+    blockSizes[2] = min(gaps->gapBlocks[blockIndexes[2]].dataBlockSize, fileSize -
+                                                                        blockSizes[1] -
+                                                                        blockSizes[0] +
+                                                                        FILE_DELIMITER_SIZE);
     if (tmpFileSize + 3 * FILE_DELIMITER_SIZE <= 0)
         return 3;
 
@@ -478,11 +401,15 @@ int mergeGap(Vault *vault, DataBlock *gap, short index) {
         __gap = vault->gaps.gapBlocks[i];
 
         // If gap is successor to __gap then save __gap index for future merge
-        if (__gap.dataBlockOffset + __gap.dataBlockSize == gap->dataBlockOffset)
+        if (__gap.dataBlockOffset +
+            __gap.dataBlockSize ==
+            gap->dataBlockOffset)
             prev = i;
 
         // If __gap is successor to gap then save __gap index for future merge
-        if (gap->dataBlockOffset + gap->dataBlockSize == __gap.dataBlockOffset)
+        if (gap->dataBlockOffset +
+            gap->dataBlockSize ==
+            __gap.dataBlockOffset)
             next = i;
     }
 
@@ -522,6 +449,7 @@ int removeFile(Vault *vault, int vfd, int fileIndex) {
     off_t offset;
     ssize_t written;
     FAT file;
+    file = vault->files[fileIndex];
     for (i = 0; i < file.numberOfPartitons; ++i) {
 
         offset = lseek(vfd, file.dataBlock[i].dataBlockOffset, SEEK_SET);
@@ -630,7 +558,7 @@ int addFile(Vault *vault, int vfd, char *fileName) {
     short numberOfGaps;
     int blockIndex[3] = {-1, -1, -1};
     ssize_t blockSizes[3] = {0, 0, 0};
-    ssize_t totalGapsSize = 0, gapSizeLeft;
+    ssize_t totalGapsSize = 0;
     DataBlock gap;
     char newName[247] = "";
 
@@ -686,7 +614,7 @@ int addFile(Vault *vault, int vfd, char *fileName) {
         }
 
         if (!removeGap(vault, blockIndex[i])) {
-            printf("Error to remove gap\n");
+            printf("Error while trying to remove gap\n");
             return -1;
         }
     }
@@ -699,19 +627,13 @@ int addFile(Vault *vault, int vfd, char *fileName) {
     vault->files[newFileIndex].numberOfPartitons = numberOfGaps;
     vault->fileMetaData.numberOfFiles++;
 
-    // If last gap was not fully used create new gap
-//    gapSizeLeft = totalGapsSize - vault->files[newFileIndex].fileSize;
-//    if (gapSizeLeft > 0) {
-//        freeIndex = findFreeGap(vault->gaps);
-//        vault->gaps.gapBlocks[vault->gaps.numberOfGaps - 1].dataBlockOffset =
-//                gap.dataBlockOffset + blockSizes[numberOfGaps - 1];
-//        vault->gaps.gapBlocks[vault->gaps.numberOfGaps - 1].dataBlockSize =
-//                gap.dataBlockSize - blockSizes[numberOfGaps - 1];
-//        if (vault->gaps.numberOfGaps > 0) { vault->gaps.numberOfGaps++; }
-//    }
+    // Update vault stats
     vault->gaps.totalFreeMemory -= vault->files[newFileIndex].fileSize;
     vault->fileMetaData.lastModificationTime = time(0);
+
     close(ifd);
+
+
     return 1;
 }
 
@@ -742,6 +664,12 @@ int findFirstGap(Gaps *gap) {
         return -1;
     }
 
+    if (gap->numberOfGaps == 1) {
+        return 0;
+    }
+
+    offset = gap->gapBlocks[0].dataBlockOffset;
+
     for (i = 0; i < gap->numberOfGaps; ++i) {
         if (offset > gap->gapBlocks[i].dataBlockOffset) {
             offset = gap->gapBlocks[i].dataBlockOffset;
@@ -751,28 +679,45 @@ int findFirstGap(Gaps *gap) {
     return minIndex;
 }
 
-double getFragmetationRation(Vault *vault) {
+double getFragmentationRation(Vault *vault) {
     int firstIndex, lastIndex;
     short removeFirst = 0, removeLast = 0;
-    ssize_t consumedMemory;
+    ssize_t consumedMemory = 0;
     firstIndex = findFirstGap(&vault->gaps);
     lastIndex = findLastGap(&vault->gaps);
+
+    if (firstIndex == -1 || lastIndex == -1) {
+        return -1;
+    }
 
     if (vault->gaps.gapBlocks[firstIndex].dataBlockOffset == VAULT_SIZE) {
         removeFirst = 1;
     }
 
-    if (vault->gaps.gapBlocks[lastIndex].dataBlockOffset + vault->gaps.gapBlocks[lastIndex].dataBlockSize ==
+    if (vault->gaps.gapBlocks[lastIndex].dataBlockOffset +
+        vault->gaps.gapBlocks[lastIndex].dataBlockSize ==
         vault->fileMetaData.vaultSize) {
         removeLast = 1;
     }
 
-    consumedMemory = vault->fileMetaData.vaultSize - VAULT_SIZE;
-    if (removeFirst) {
-        consumedMemory -= vault->gaps.gapBlocks[firstIndex].dataBlockSize;
-    }
-    if (removeLast) {
-        consumedMemory -= vault->gaps.gapBlocks[lastIndex].dataBlockSize;
+    if (removeFirst && removeLast) {
+        consumedMemory =
+                vault->gaps.gapBlocks[lastIndex].dataBlockOffset -
+                vault->gaps.gapBlocks[firstIndex].dataBlockSize +
+                vault->gaps.gapBlocks[firstIndex].dataBlockOffset;
+    } else if (removeFirst) {
+        consumedMemory =
+                vault->fileMetaData.vaultSize -
+                vault->gaps.gapBlocks[firstIndex].dataBlockSize +
+                vault->gaps.gapBlocks[firstIndex].dataBlockOffset;
+    } else if (removeLast) {
+        consumedMemory =
+                vault->gaps.gapBlocks[lastIndex].dataBlockOffset -
+                VAULT_SIZE;
+    } else {
+        consumedMemory =
+                vault->fileMetaData.vaultSize -
+                VAULT_SIZE;
     }
     return consumedMemory / (vault->fileMetaData.vaultSize - VAULT_SIZE);
 
@@ -784,9 +729,18 @@ int status(Vault *vault) {
         // TODO error message
         return 0;
     }
+
+    double fragRatio = getFragmentationRation(vault);
+    if (fragRatio == -1.0) {
+        // TODO error message
+        return 0;
+    }
     printf("%-21s %d\n", "Number of files:", vault->fileMetaData.numberOfFiles);
-    printf("%-21s %zuB\n", "Total size:", vault->fileMetaData.vaultSize - vault->gaps.totalFreeMemory - VAULT_SIZE);
-    printf("%-21s %.1f\n", "Fragmentation ratio:", getFragmetationRation(vault));
+    printf("%-21s %zuB\n", "Total size:", vault->fileMetaData.vaultSize -
+                                          vault->gaps.totalFreeMemory -
+                                          VAULT_SIZE);
+    printf("%-21s %lg\n", "Fragmentation ratio:", fragRatio);
+    return 1;
 }
 
 int fetchFile(Vault *vault, int vfd, int fileIndex) {
@@ -801,7 +755,6 @@ int fetchFile(Vault *vault, int vfd, int fileIndex) {
     char *buffer;
     ssize_t readBufferSize;
     ssize_t writeSize, written, readNumber;
-    off_t offset;
     FAT file;
     int i;
     buffer = malloc(BUFFER_SIZE);
@@ -831,7 +784,7 @@ int fetchFile(Vault *vault, int vfd, int fileIndex) {
             }
             written = write(ofd, buffer, (size_t) readBufferSize);
             if (written != readBufferSize) {
-                // TOOD error messsage
+                // TODO error message
                 return 0;
             }
             writeSize -= written;
@@ -841,7 +794,58 @@ int fetchFile(Vault *vault, int vfd, int fileIndex) {
     return 1;
 }
 
+int findNearGapIndex(Gaps gap, off_t offset) {
+    int i;
+    for (i = 0; i < gap.numberOfGaps; ++i) {
+        if (gap.gapBlocks[i].dataBlockOffset +
+            gap.gapBlocks[i].dataBlockSize ==
+            offset) {
+            return i;
+        }
+    }
+    return -1;
+}
+
 int defrag(Vault *vault, int vfd) {
+
+    // TODO error messages
+
+    FAT file;
+    ssize_t written, readNumber;
+    int i, j, gapIndex/*, partitionIndex*/;
+    for (i = 0; i < vault->fileMetaData.numberOfFiles; ++i) {
+
+        file = vault->files[i];
+        for (j = 0; j < file.numberOfPartitons; ++j) {
+            printf("Offset of partition   - %zu\n", file.dataBlock[j].dataBlockOffset);
+            // Find if gap exists next to file data block
+            gapIndex = findNearGapIndex(vault->gaps, file.dataBlock[i].dataBlockOffset);
+            if (gapIndex != -1 && j > 0) {
+                // Remove start and end delimiter
+
+                lseek(vfd, file.dataBlock[j].dataBlockOffset , SEEK_SET);
+                written = write(vfd, ZERO_DELIMITER, 8);
+                if (written != 8) {
+                    // TODO error message
+                    return 0;
+                }
+                lseek(vfd, file.dataBlock[j].dataBlockSize - 16, SEEK_CUR);
+                written = write(vfd, ZERO_DELIMITER, 8);
+                if (written != 8) {
+                    // TODO error message
+                    return 0;
+                }
+
+                
+
+                if (file.dataBlock[j - 1].dataBlockOffset +
+                    vault->gaps.gapBlocks[gapIndex].dataBlockSize ==
+                    file.dataBlock[j].dataBlockOffset) {
+                }
+            }
+        }
+    }
+
 
 }
 
@@ -854,6 +858,7 @@ int main(int argc, char **argv) {
     // start time measurement
     gettimeofday(&start, NULL);
 
+/*
 
     int fd = open("test.vlt", O_WRONLY | O_CREAT | O_TRUNC, S_IWUSR | S_IRUSR);
     init(fd, 5 * VAULT_SIZE);
@@ -866,17 +871,17 @@ int main(int argc, char **argv) {
     printf("Add file - files/input.txt\n");
     addFile(vault, fd, "files/input.txt");
 
-//    listFiles(vault);
+    listFiles(vault);
 
     printf("Add file - files/input2.txt\n");
     addFile(vault, fd, "files/input2.txt");
 
-//    listFiles(vault);
+    listFiles(vault);
 
     printf("Add file - files/input.txt\n");
     addFile(vault, fd, "files/input.txt");
 
-//    listFiles(vault);
+    listFiles(vault);
 
     printf("Remove file - input2.txt\n");
     int index = findFileInVault(vault, "input2.txt");
@@ -885,20 +890,21 @@ int main(int argc, char **argv) {
     printf("\nAdd file - files/input5.txt\n");
     addFile(vault, fd, "files/input5.txt");
 
-//    listFiles(vault);
+    listFiles(vault);
 
-    printf("Add file - input2.txt\n");
-    addFile(vault, fd, "input2.txt");
+    printf("Add file - files/input2.txt\n");
+    addFile(vault, fd, "files/input2.txt");
 
     listFiles(vault);
 
-    printf("\nAdd file - files/input3.txt\n");
-    addFile(vault, fd, "files/input3.txt");
 
     printf("\nAdd file - files/input4.txt\n");
     addFile(vault, fd, "files/input4.txt");
 
-    listFiles(vault);
+
+    printf("\nAdd file - files/input3.txt\n");
+    addFile(vault, fd, "files/input3.txt");
+
     printf("\nRemove file - input2.txt\n");
     index = findFileInVault(vault, "input2.txt");
     removeFile(vault, fd, index);
@@ -907,35 +913,37 @@ int main(int argc, char **argv) {
     index = findFileInVault(vault, "input4.txt");
     removeFile(vault, fd, index);
 
+
     printf("\nAdd file - files/input4.txt\n");
     addFile(vault, fd, "files/input4.txt");
 
-//    printf("\nAdd file - files/input5.txt\n");
-//    addFile(vault, fd, "files/input5.txt");
-//
-//    printf("\nAdd file - files/input1.txt\n");
-//    addFile(vault, fd, "files/input1.txt");
-//
-//    printf("\nAdd file - files/empty_file.txt\n");
-//    addFile(vault, fd, "files/empty_file.txt");
+    printf("\nAdd file - files/input5.txt\n");
+    addFile(vault, fd, "files/input5.txt");
 
-    printf("\nRemove file - input4.txt\n");
-    index = findFileInVault(vault, "input4.txt");
-    removeFile(vault, fd, index);
+    printf("\nAdd file - files/input1.txt\n");
+    addFile(vault, fd, "files/input1.txt");
+
+    printf("\nAdd file - files/empty_file.txt\n");
+    addFile(vault, fd, "files/empty_file.txt");
 
     printf("\nRemove file - input3.txt\n");
     index = findFileInVault(vault, "input3.txt");
     removeFile(vault, fd, index);
 
-    printf("\nAdd file - files/input4.txt\n");
-    addFile(vault, fd, "files/input4.txt");
-
     printf("\nAdd file - files/input3.txt\n");
     addFile(vault, fd, "files/input3.txt");
-//
-//    status(vault);
 
-//    fetchFile(vault, fd, 1);
+
+    printf("\nFetch - input3.txt\n");
+    index = findFileInVault(vault, "input3.txt");
+    fetchFile(vault, fd, index);
+
+    index = findFileInVault(vault, "input5.txt");
+    removeFile(vault, fd, index);
+
+    printf("\nStatus\n");
+    status(vault);
+
 
     if (!saveVaultToFile(vault, fd)) {
         printf("LOL1");
@@ -952,6 +960,7 @@ int main(int argc, char **argv) {
 
     close(fd);
     free(vault);
+*/
 
 
     // end time measurement and print result
