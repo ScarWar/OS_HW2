@@ -866,23 +866,26 @@ int main(int argc, char **argv) {
     printf("Add file - files/input.txt\n");
     addFile(vault, fd, "files/input.txt");
 
-    listFiles(vault);
+//    listFiles(vault);
 
     printf("Add file - files/input2.txt\n");
     addFile(vault, fd, "files/input2.txt");
 
-    listFiles(vault);
+//    listFiles(vault);
 
     printf("Add file - files/input.txt\n");
     addFile(vault, fd, "files/input.txt");
 
-    listFiles(vault);
+//    listFiles(vault);
 
     printf("Remove file - input2.txt\n");
     int index = findFileInVault(vault, "input2.txt");
     removeFile(vault, fd, index);
 
-    listFiles(vault);
+    printf("\nAdd file - files/input5.txt\n");
+    addFile(vault, fd, "files/input5.txt");
+
+//    listFiles(vault);
 
     printf("Add file - input2.txt\n");
     addFile(vault, fd, "input2.txt");
@@ -896,17 +899,17 @@ int main(int argc, char **argv) {
     addFile(vault, fd, "files/input4.txt");
 
     listFiles(vault);
-//    printf("\nRemove file - input2.txt\n");
-//    index = findFileInVault(vault, "input2.txt");
-//    removeFile(vault, fd, index);
-//
-//    printf("\nRemove file - input4.txt\n");
-//    index = findFileInVault(vault, "input4.txt");
-//    removeFile(vault, fd, index);
-//
-//    printf("\nAdd file - files/input4.txt\n");
-//    addFile(vault, fd, "files/input4.txt");
-//
+    printf("\nRemove file - input2.txt\n");
+    index = findFileInVault(vault, "input2.txt");
+    removeFile(vault, fd, index);
+
+    printf("\nRemove file - input4.txt\n");
+    index = findFileInVault(vault, "input4.txt");
+    removeFile(vault, fd, index);
+
+    printf("\nAdd file - files/input4.txt\n");
+    addFile(vault, fd, "files/input4.txt");
+
 //    printf("\nAdd file - files/input5.txt\n");
 //    addFile(vault, fd, "files/input5.txt");
 //
@@ -915,21 +918,20 @@ int main(int argc, char **argv) {
 //
 //    printf("\nAdd file - files/empty_file.txt\n");
 //    addFile(vault, fd, "files/empty_file.txt");
-//
-//    printf("\nRemove file - input3.txt\n");
-//    index = findFileInVault(vault, "input3.txt");
-//    removeFile(vault, fd, index);
-//
-//    printf("\nRemove file - input4.txt\n");
-//    index = findFileInVault(vault, "input4.txt");
-//    removeFile(vault, fd, index);
-//
-//
-//    printf("\nAdd file - files/input4.txt\n");
-//    addFile(vault, fd, "files/input4.txt");
-//
-//    printf("\nAdd file - files/input3.txt\n");
-//    addFile(vault, fd, "files/input3.txt");
+
+    printf("\nRemove file - input4.txt\n");
+    index = findFileInVault(vault, "input4.txt");
+    removeFile(vault, fd, index);
+
+    printf("\nRemove file - input3.txt\n");
+    index = findFileInVault(vault, "input3.txt");
+    removeFile(vault, fd, index);
+
+    printf("\nAdd file - files/input4.txt\n");
+    addFile(vault, fd, "files/input4.txt");
+
+    printf("\nAdd file - files/input3.txt\n");
+    addFile(vault, fd, "files/input3.txt");
 //
 //    status(vault);
 

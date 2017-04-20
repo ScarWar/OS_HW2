@@ -3,5 +3,5 @@ project(OS_HW2)
 
 set(CMAKE_C_STANDARD 90)
 
-set(SOURCE_FILES main.c)
+set(SOURCE_FILES vault.c)
 add_executable(OS_HW2 ${SOURCE_FILES})
