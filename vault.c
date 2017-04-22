@@ -26,7 +26,8 @@
 #define MAX_NUM_OF_FILES 100
 #define MAX_NUM_OF_GAPS 300
 #define BUFFER_SIZE 4 * K
-
+#define REPORT_ERR printf("Error - %s, Line %d\n",strerror(errno), __LINE__)
+#define REPORT_ERR_MSG(msg) printf("Error - %s, Line %d\n",(msg), __LINE__)
 
 typedef struct data_block_t {
     off_t dataBlockOffset;
@@ -69,20 +70,20 @@ typedef struct tiple_t {
 Vault *readVault(int vfd) {
     ssize_t readNumber;
     if (vfd < 0) {
-        // TODO error message
+        REPORT_ERR_MSG("Invalid file descriptor");
         return 0;
     }
     Vault *vault;
     vault = malloc(VAULT_SIZE);
     if (vault == NULL) {
-        // TODO error message
+        REPORT_ERR;
         return NULL;
     }
 
 
     readNumber = read(vfd, vault, VAULT_SIZE);
     if (readNumber < 0 || readNumber != VAULT_SIZE) {
-        // TODO error message
+        REPORT_ERR;
         return NULL;
     }
     return vault;
@@ -96,7 +97,7 @@ int tupleCompare(const void *a, const void *b) {
 
 int getFileName(char *fullName, char *trgt) {
     if (fullName == NULL || trgt == NULL) {
-        // TODO error message
+        REPORT_ERR_MSG("Null pointer argument");
         return 0;
     }
     int i;
@@ -119,6 +120,10 @@ int getFileName(char *fullName, char *trgt) {
 
 int findFileInVault(Vault *vault, char *fileName) {
     int i;
+    if (vault == NULL || fileName == NULL) {
+        REPORT_ERR_MSG("Null pointer argument");
+        return 0;
+    }
     for (i = 0; i < vault->fileMetaData.numberOfFiles; ++i) {
         if (strcmp(fileName, vault->files[i].fileName) == 0) {
             return i;
@@ -129,10 +134,10 @@ int findFileInVault(Vault *vault, char *fileName) {
 
 int saveVaultToFile(Vault *vault, int vfd) {
     if (vault == NULL) {
-        // TODO error message
+        REPORT_ERR_MSG("Null pointer argument");
         return 0;
     } else if (vfd < 0) {
-        // TODO error message
+        REPORT_ERR_MSG("Invalid file descriptor");
         return 0;
     }
     off_t offset;
@@ -140,13 +145,13 @@ int saveVaultToFile(Vault *vault, int vfd) {
 
     offset = lseek(vfd, 0, SEEK_SET);
     if (offset != 0) {
-        // TODO error message
+        REPORT_ERR_MSG("lseek function failed");
         return 0;
     }
 
     written = write(vfd, vault, VAULT_SIZE);
     if (written != VAULT_SIZE) {
-        // TODO error message
+        REPORT_ERR_MSG("Failed to save vault to file");
         return 0;
     }
     return 1;
@@ -162,6 +167,9 @@ int fileNameMaxWidth(Vault *vault) {
 
 ssize_t formatSize(ssize_t fileSize, char *sizeType) {
     ssize_t approxSize;
+    if (sizeType == NULL) {
+        REPORT_ERR_MSG("Null pointer argument");
+    }
     if (fileSize <= K) {
         *sizeType = 'B';
         approxSize = fileSize;
@@ -181,11 +189,14 @@ ssize_t formatSize(ssize_t fileSize, char *sizeType) {
 int sortIndexByOffset(Gaps *gap, int *blockIndexes, int numberOfIndexes) {
     int k;
     if (gap == NULL || blockIndexes == NULL) {
-        // TODO error message
+        REPORT_ERR_MSG("Null pointer argument");
         return 0;
     }
     if (numberOfIndexes < 0) {
-        // TODO error message
+        REPORT_ERR_MSG("Invalid argument, index must be non-negative");
+        return 0;
+    } else if (numberOfIndexes > 3) {
+        REPORT_ERR_MSG("Invalid argument, index must be smaller then 3");
         return 0;
     }
 
@@ -203,6 +214,12 @@ int findGap(const Gaps *gaps, ssize_t *fileSize,
     char continueFlag = 0;
     int currBlock = -1, j, i;
     ssize_t maxBlockSize = 0, blockSize;
+
+    if (gaps == NULL || fileSize == NULL || totalBlock == NULL) {
+        REPORT_ERR_MSG("Null pointer argument");
+        return -1;
+    }
+
     for (i = 0; i < gaps->numberOfGaps; ++i) {
 
         // Check if the gas was already selected
@@ -236,22 +253,19 @@ short findGaps(int blockIndexes[], ssize_t blockSizes[], Gaps *gaps, ssize_t fil
     int index;
     ssize_t totalBlock = 0, tmpFileSize;
     if (gaps == NULL || fileSize < 0) {
-        // TODO error message
+        REPORT_ERR_MSG("Null pointer argument");
         return -1;
     }
 
     tmpFileSize = fileSize;
     if (gaps->totalFreeMemory < tmpFileSize) {
-        printf("No enough free memory, try to delete files\n");
+        REPORT_ERR_MSG("No enough free memory, try to delete files");
         return 0;
     }
 
     // Find first gap
     index = findGap(gaps, &tmpFileSize, &totalBlock, blockIndexes, 0);
-    if (index == -1) {
-        // TODO error message
-        return -1;
-    }
+    if (index == -1) return -1;
 
     blockIndexes[0] = index;
     blockSizes[0] = min(gaps->gapBlocks[index].dataBlockSize, fileSize + FILE_DELIMITER_SIZE);
@@ -260,15 +274,9 @@ short findGaps(int blockIndexes[], ssize_t blockSizes[], Gaps *gaps, ssize_t fil
 
     // Find second gap
     index = findGap(gaps, &tmpFileSize, &totalBlock, blockIndexes, 1);
-    if (index == -1) {
-        // TODO error message
-        return -1;
-    }
+    if (index == -1) return -1;
     blockIndexes[1] = index;
-    if (!sortIndexByOffset(gaps, blockIndexes, 2)) {
-        // TODO error message
-        return -1;
-    }
+    if (!sortIndexByOffset(gaps, blockIndexes, 2)) return -1;
     blockSizes[0] = gaps->gapBlocks[blockIndexes[0]].dataBlockSize;
     blockSizes[1] = min(gaps->gapBlocks[blockIndexes[1]].dataBlockSize, fileSize -
                                                                         blockSizes[0] +
@@ -278,16 +286,9 @@ short findGaps(int blockIndexes[], ssize_t blockSizes[], Gaps *gaps, ssize_t fil
 
     // Find third hap
     index = findGap(gaps, &fileSize, &totalBlock, blockIndexes, 2);
-    if (index == -1) {
-        // TODO error message
-        return -1;
-    }
-
+    if (index == -1) return -1;
     blockIndexes[2] = index;
-    if (!sortIndexByOffset(gaps, blockIndexes, 3)) {
-        // TODO error message
-        return -1;
-    }
+    if (!sortIndexByOffset(gaps, blockIndexes, 3)) return -1;
     blockSizes[0] = gaps->gapBlocks[blockIndexes[0]].dataBlockSize;
     blockSizes[1] = gaps->gapBlocks[blockIndexes[1]].dataBlockSize;
     blockSizes[2] = min(gaps->gapBlocks[blockIndexes[2]].dataBlockSize, fileSize -
@@ -296,14 +297,13 @@ short findGaps(int blockIndexes[], ssize_t blockSizes[], Gaps *gaps, ssize_t fil
                                                                         FILE_DELIMITER_SIZE);
     if (tmpFileSize + 3 * FILE_DELIMITER_SIZE <= 0)
         return 3;
-
-    printf("No enough free memory. Use defragmentation and try to add again\n");
+    REPORT_ERR_MSG("No enough free memory. Use defragmentation and try to add again");
     return 0;
 }
 
 int mergeGaps(Vault *vault, int i, int j) {
     if (vault == NULL) {
-        // TODO error message
+        REPORT_ERR_MSG("Null pointer argument");
         return 0;
     }
     DataBlock tmpGap;
@@ -330,7 +330,7 @@ int mergeGap(Vault *vault, DataBlock *gap, short index) {
     DataBlock __gap;
 
     if (gap == NULL || vault == NULL) {
-        // TODO error message
+        REPORT_ERR_MSG("Null pointer argument");
         return -1;
     }
 
@@ -365,8 +365,11 @@ int mergeGap(Vault *vault, DataBlock *gap, short index) {
 }
 
 int removeGap(Vault *vault, int gapIndex) {
-    if (vault == NULL || gapIndex < 0) {
-        // TODO error message
+    if (vault == NULL) {
+        REPORT_ERR_MSG("Null pointer argument");
+        return 0;
+    } else if (gapIndex < 0) {
+        REPORT_ERR_MSG("Invalid argument, index must be non-negative");
         return 0;
     }
     if (vault->gaps.numberOfGaps == 1)
@@ -382,18 +385,18 @@ int writeToBlock(int vfd, int ifd, ssize_t dataToWrite, DataBlock dataBlock) {
     char *buffer;
     buffer = malloc(BUFFER_SIZE);
     if (buffer == NULL) {
-        // TODO error message
+        REPORT_ERR;
         return 0;
     }
 
     offset = lseek(vfd, dataBlock.dataBlockOffset, SEEK_SET);
     if (offset != dataBlock.dataBlockOffset) {
-        // TODO error message
+        REPORT_ERR;
         return 0;
     }
     written = write(vfd, START_DELIMITER, 8);
     if (written != 8) {
-        // TODO error message
+        REPORT_ERR;
         return 0;
     }
 
@@ -403,14 +406,18 @@ int writeToBlock(int vfd, int ifd, ssize_t dataToWrite, DataBlock dataBlock) {
         readBufferSize = min(dataToWrite, BUFFER_SIZE);
         readSize = read(ifd, buffer, (size_t) readBufferSize);
         if (readSize < 0) {
-            // TODO error message
+            REPORT_ERR;
+            if (write(vfd, END_DELIMITER, 8) != 8)
+                printf("Error - Failed to exit safely, data may have been corrupted");
             return 0;
         }
 
         // Write to vault
         written = write(vfd, buffer, (size_t) readBufferSize);
         if (written != readBufferSize) {
-            // TODO error message
+            REPORT_ERR;
+            if (write(vfd, END_DELIMITER, 8) != 8)
+                printf("Error - Failed to exit safely, data may have been corrupted");
             return 0;
         }
 
@@ -420,7 +427,7 @@ int writeToBlock(int vfd, int ifd, ssize_t dataToWrite, DataBlock dataBlock) {
 
     written = write(vfd, END_DELIMITER, 8);
     if (written != 8) {
-        // TODO error message
+        REPORT_ERR;
         return 0;
     }
     return 1;
@@ -431,7 +438,7 @@ int findLastGap(Gaps *gap) {
     off_t offset = 0;
 
     if (gap == NULL) {
-        // TODO error message
+        REPORT_ERR_MSG("Null pointer argument");
         return -1;
     }
 
@@ -449,7 +456,7 @@ int findFirstGap(Gaps *gap) {
     off_t offset = 0;
 
     if (gap == NULL) {
-        // TODO error message
+        REPORT_ERR_MSG("Null pointer argument");
         return -1;
     }
 
@@ -484,6 +491,12 @@ double getFragmentationRation(Vault *vault) {
     int firstIndex, lastIndex;
     short removeFirst = 0, removeLast = 0;
     ssize_t consumedMemory = 0, fragmentedMemory = vault->gaps.totalFreeMemory;
+
+    if (vault == NULL) {
+        REPORT_ERR_MSG("Null pointer argument");
+        return -1;
+    }
+
     firstIndex = findFirstGap(&vault->gaps);
     lastIndex = findLastGap(&vault->gaps);
 
@@ -528,7 +541,7 @@ double getFragmentationRation(Vault *vault) {
                 vault->fileMetaData.vaultSize -
                 VAULT_SIZE;
     }
-    return fragmentedMemory / (double) (consumedMemory);
+    return (double) fragmentedMemory / (double) (consumedMemory);
 
 }
 
@@ -537,7 +550,7 @@ size_t getTotalNumberOfPartitions(Vault *vault) {
     int i;
 
     if (vault == NULL) {
-        // TODO error message
+        REPORT_ERR_MSG("Null pointer argument");
         return 0;
     }
     for (i = 0; i < vault->fileMetaData.numberOfFiles; ++i) {
@@ -550,12 +563,12 @@ long getSizeFromString(char *string) {
     long size;
     char type;
     if (string == NULL) {
-        // TODO error message
+        REPORT_ERR_MSG("Null pointer argument");
         return -1;
     }
     // Read data from string
     if (sscanf(string, "%ld%c", &size, &type) != 2) {
-        printf("Error - Invalid data formant was entered\n");
+        REPORT_ERR_MSG("Invalid data formant was entered");
         return -1;
     }
     // Calculate data size
@@ -567,7 +580,7 @@ long getSizeFromString(char *string) {
         return size * M;
     else if (type == G)
         return size * G;
-    printf("Error - Unknown data type was entered\n");
+    REPORT_ERR_MSG("Unknown data type was entered");
     return -1;
 }
 
@@ -583,11 +596,16 @@ ssize_t init(int vfd, long dataSize) {
     Vault *vault;
 
     if (dataSize < VAULT_SIZE) {
-        printf("Error - Entered vault size isn't large enough\n");
+        REPORT_ERR_MSG("Entered vault size isn't large enough to create a vault");
         return 0;
     }
 
     vault = malloc(VAULT_SIZE);
+    if (vault == NULL) {
+        REPORT_ERR;
+        return 0;
+    }
+
     // Add File meta data
     vault->fileMetaData.vaultSize = dataSize;
     vault->fileMetaData.creationTime = time(0);
@@ -603,36 +621,36 @@ ssize_t init(int vfd, long dataSize) {
     // Create file of size dataSize using lseek
     written = write(vfd, "#", 1);
     if (written < 0) {
-        // TODO error message
+        REPORT_ERR;
         return 0;
     }
 
     offset = lseek(vfd, dataSize - 1, SEEK_SET);
     if (offset == -1 || offset != dataSize - 1) {
-        // TODO error message
+        REPORT_ERR;
         return 0;
     }
 
     written = write(vfd, "#", 1);
     if (written < 0) {
-        // TODO error message
+        REPORT_ERR;
         return 0;
     }
 
     offset = lseek(vfd, 0, SEEK_SET);
     if (offset != 0) {
-        // TODO error message
+        REPORT_ERR;
         return 0;
     }
 
     written = write(vfd, vault, VAULT_SIZE);
     if (written != VAULT_SIZE) {
-        // TODO error message
+        REPORT_ERR;
         return 0;
     }
 
     free(vault);
-    printf("Result: A vault created");
+    printf("Result: A vault created\n");
     return 1;
 }
 
@@ -646,7 +664,7 @@ int addFile(Vault *vault, int vfd, char *fileName) {
     char newName[247] = "";
 
     if (vault == NULL || fileName == NULL) {
-        // TODO error message
+        REPORT_ERR_MSG("Null pointer argument");
         return 0;
     }
 
@@ -671,16 +689,15 @@ int addFile(Vault *vault, int vfd, char *fileName) {
 
     ifd = open(fileName, O_RDONLY, S_IRUSR | S_IWUSR);
     if (ifd < 0) {
-        // TODO error message
-        printf("%s\n", "Error in opening");
+        REPORT_ERR;
         return 0;
     }
 
     numberOfGaps = findGaps(blockIndex, blockSizes, &vault->gaps, sb.st_size);
-    if (numberOfGaps == -1) { // Error in finding a gap
+    if (numberOfGaps == -1) // Error in finding a gap
         return 0;
-    } else if (numberOfGaps == 0) {
-        printf("Unable to add file, no valid partition exists\n");
+    else if (numberOfGaps == 0) {
+        REPORT_ERR_MSG("Unable to add file, no valid partition exists");
         return 0;
     }
     newFileIndex = vault->fileMetaData.numberOfFiles;
@@ -784,28 +801,28 @@ int fetchFile(Vault *vault, int vfd, int fileIndex) {
     ssize_t readBufferSize;
     ssize_t writeSize, written, readNumber;
     FAT file;
-    int i;
+    int i, ofd;
 
     if (vault == NULL) {
-        // TODO error message
+        REPORT_ERR_MSG("Null pointer argument");
         return 0;
     }
     if (fileIndex < 0) {
-        // TODO error message
+        REPORT_ERR_MSG("Invalid file descriptor");
         return 0;
     }
     buf = malloc(BUFFER_SIZE);
     if (buf == NULL) {
-        // TODO error message
+        REPORT_ERR;
         return 0;
     }
 
     // TODO add permissions check
 
     file = vault->files[fileIndex];
-    int ofd = open(file.fileName, O_WRONLY | O_CREAT | O_TRUNC, file.fileProtaction);
+    ofd = open(file.fileName, O_WRONLY | O_CREAT | O_TRUNC, file.fileProtaction);
     if (ofd < 0) {
-        // TODO error message
+        REPORT_ERR;
         return 0;
     }
 
@@ -816,12 +833,12 @@ int fetchFile(Vault *vault, int vfd, int fileIndex) {
             readBufferSize = min(writeSize, BUFFER_SIZE);
             readNumber = read(vfd, buf, (size_t) readBufferSize);
             if (readNumber < 0) {
-                // TODO error message
+                REPORT_ERR;
                 return 0;
             }
             written = write(ofd, buf, (size_t) readBufferSize);
             if (written != readBufferSize) {
-                // TODO error message
+                REPORT_ERR;
                 return 0;
             }
             writeSize -= written;
@@ -835,13 +852,12 @@ int fetchFile(Vault *vault, int vfd, int fileIndex) {
 
 int status(Vault *vault) {
     if (vault == NULL) {
-        // TODO error message
+        REPORT_ERR_MSG("Null pointer argument");
         return 0;
     }
 
     double fragRatio = getFragmentationRation(vault);
-    if (fragRatio == -1.0) {
-        // TODO error message
+    if (fragRatio < 0) {
         return 0;
     }
     printf("%-21s %d\n", "Number of files:", vault->fileMetaData.numberOfFiles);
@@ -855,7 +871,7 @@ int status(Vault *vault) {
 int list(Vault *vault) {
 
     if (vault == NULL) {
-        // TODO error message
+        REPORT_ERR_MSG("Null pointer argument");
         return 0;
     }
 
@@ -882,15 +898,21 @@ int defragmentation(Vault *vault, int vfd) {
     short gapIndex;
     size_t numOfPartitions;
     char *buf;
-    char mergeFlag;
-    // TODO error messages
+    char dataBlockMergeFlag, dataBlockFoundFlag;
 
+    if (vault == NULL) {
+        REPORT_ERR_MSG("Null pointer argument");
+        return 0;
+    } else if (vfd < 0) {
+        REPORT_ERR_MSG("Invalid file descriptor");
+        return 0;
+    }
 
     // Create and fill array of all offsets, then sort them according to offset
     numOfPartitions = getTotalNumberOfPartitions(vault);
     Tuple *tupleArray = malloc(numOfPartitions * sizeof(Tuple));
     if (tupleArray == NULL) {
-        // TODO error message
+        REPORT_ERR;
         return 0;
     }
     for (i = 0; i < vault->fileMetaData.numberOfFiles; ++i) {
@@ -903,32 +925,35 @@ int defragmentation(Vault *vault, int vfd) {
 
     buf = malloc(BUFFER_SIZE);
     if (buf == NULL) {
-        // TODO error message
+        REPORT_ERR;
         return 0;
     }
 
     for (i = 0; i < numOfPartitions; ++i) {
-        mergeFlag = 0;
+        dataBlockMergeFlag = 0;
+        dataBlockFoundFlag = 0;
         file = vault->files[tupleArray[i].index];
         gapIndex = findNearGapIndex(vault->gaps, tupleArray[i].offset);
-        if (gapIndex != -1) {
+        // Find partition index with offset
+        for (j = 0; j < file.numberOfPartitons; ++j)
+            if (tupleArray[i].offset == file.dataBlock[j].dataBlockOffset) {
+                dataBlockFoundFlag = 1;
+                break;
+            }
+        if (gapIndex != -1 && dataBlockFoundFlag) {
             // Go to the start of the DataBlock
             lseek(vfd, tupleArray[i].offset, SEEK_SET);
             // Remove start delimiter
             written = write(vfd, ZERO_DELIMITER, 8);
             if (written != 8) {
-                // TODO error message
+                REPORT_ERR;
                 return 0;
             }
-            // Find partition index with offset
-            for (j = 0; j < file.numberOfPartitons; ++j)
-                if (tupleArray[i].offset == file.dataBlock[j].dataBlockOffset)
-                    break;
             lseek(vfd, file.dataBlock[j].dataBlockSize - 16, SEEK_CUR);
             // Remove end delimiter
             written = write(vfd, ZERO_DELIMITER, 8);
             if (written != 8) {
-                // TODO error message
+                REPORT_ERR;
                 return 0;
             }
 
@@ -937,27 +962,27 @@ int defragmentation(Vault *vault, int vfd) {
                 if (file.dataBlock[j - 1].dataBlockOffset +
                     vault->gaps.gapBlocks[gapIndex].dataBlockSize ==
                     file.dataBlock[j].dataBlockOffset) {
-                    mergeFlag ^= 1;
+                    dataBlockMergeFlag = 1;
                     // Remove end delimiter of previous DataBlock
                     lseek(vfd, file.dataBlock[j - 1].dataBlockOffset +
                                file.dataBlock[j - 1].dataBlockSize - 8, SEEK_CUR);
                     written = write(vfd, ZERO_DELIMITER, 8);
                     if (written != 8) {
-                        // TODO error message
+                        REPORT_ERR;
                         return 0;
                     }
                 }
             }
 
-            // Move to start of gap
+            // Move to the start of the gap
             writeOffset = lseek(vfd, vault->gaps.gapBlocks[gapIndex].dataBlockOffset, SEEK_SET);
 
             // Move DataBlock to new location
             // If no merge is needed then add start delimiter
-            if (!mergeFlag) {
+            if (!dataBlockMergeFlag) {
                 written = write(vfd, START_DELIMITER, 8);
                 if (written != 8) {
-                    // TODO error message
+                    REPORT_ERR;
                     return 0;
                 }
                 writeOffset += 8;
@@ -973,7 +998,7 @@ int defragmentation(Vault *vault, int vfd) {
                 lseek(vfd, readOffset, SEEK_SET);
                 readNumber = read(vfd, buf, bufSize);
                 if (readNumber < 0) {
-                    // TODO error message
+                    REPORT_ERR;
                     return 0;
                 }
                 readOffset += readNumber;
@@ -982,7 +1007,7 @@ int defragmentation(Vault *vault, int vfd) {
                 lseek(vfd, writeOffset, SEEK_SET);
                 written = write(vfd, buf, bufSize);
                 if (written != bufSize) {
-                    // TODO error message
+                    REPORT_ERR;
                     return 0;
                 }
                 writeOffset += written;
@@ -991,22 +1016,36 @@ int defragmentation(Vault *vault, int vfd) {
             }
             written = write(vfd, END_DELIMITER, 8);
             if (written != 8) {
-                // TODO error message
+                REPORT_ERR;
                 return 0;
             }
 
             // Update gap position and size
             vault->gaps.gapBlocks[gapIndex].dataBlockOffset = writeOffset + 8;
-            if (mergeFlag) {
+            if (dataBlockMergeFlag) {
                 vault->gaps.gapBlocks[gapIndex].dataBlockSize += FILE_DELIMITER_SIZE;
             }
 
             // Merge gaps if needed
             if (mergeGap(vault, &vault->gaps.gapBlocks[gapIndex], gapIndex) == -1) {
-                // TODO error message
                 return 0;
             }
         }
+
+        // TODO add merge of partitions
+        // If can merge DataBlocks into one
+        if (dataBlockMergeFlag && dataBlockFoundFlag) {
+            // Megre file.dataBlock[j - 1] and file.dataBlock[j]
+
+            // Move all files one back
+            for (k = j; k < vault->files[tupleArray[i].index].numberOfPartitons; ++k) {
+
+            }
+
+            vault->files[tupleArray[i].index].numberOfPartitons--;
+        }
+
+
     }
     free(tupleArray);
     free(buf);
