@@ -13,7 +13,7 @@
 
 #define START_DELIMITER "<<<<<<<<"
 #define END_DELIMITER ">>>>>>>>"
-#define ZERO_DELIMITER "00000000"
+#define ZERO_DELIMITER "000000000"
 #define _FILE_OFFSET_BITS 64
 #define max(s, t) ((s) > (t)) ? (s) : (t)
 #define min(s, t) ((s) < (t)) ? (s) : (t)
@@ -61,55 +61,10 @@ typedef struct vault_t {
     FAT files[MAX_NUM_OF_FILES];
 } Vault;
 
-
-ssize_t init(int vfd, long dataSize) {
-    ssize_t written;
+typedef struct tiple_t {
+    int index;
     off_t offset;
-    Vault *vault = malloc(sizeof(Vault));
-    vault->fileMetaData.vaultSize = dataSize;
-    vault->fileMetaData.creationTime = time(0);
-    vault->fileMetaData.lastModificationTime = vault->fileMetaData.creationTime;
-    vault->fileMetaData.numberOfFiles = 0;
-
-    vault->gaps.totalFreeMemory = dataSize - VAULT_SIZE;
-    vault->gaps.numberOfGaps = 1;
-    vault->gaps.gapBlocks[0].dataBlockSize = dataSize - VAULT_SIZE;
-    vault->gaps.gapBlocks[0].dataBlockOffset = VAULT_SIZE;
-
-    // Create file of size dataSize using lseek
-    written = write(vfd, "#", 1);
-    if (written < 0) {
-        // TODO error message
-        return 0;
-    }
-
-    offset = lseek(vfd, dataSize - 1, SEEK_SET);
-    if (offset == -1 || offset != dataSize - 1) {
-        // TODO error message
-        return 0;
-    }
-
-    written = write(vfd, "#", 1);
-    if (written < 0) {
-        // TODO error message
-        return 0;
-    }
-
-    offset = lseek(vfd, 0, SEEK_SET);
-    if (offset != 0) {
-        // TODO error message
-        return 0;
-    }
-
-    written = write(vfd, vault, VAULT_SIZE);
-    if (written != VAULT_SIZE) {
-        // TODO error message
-        return 0;
-    }
-
-    free(vault);
-    return written;
-}
+} Tuple;
 
 Vault *readVault(int vfd) {
     ssize_t readNumber;
@@ -131,6 +86,12 @@ Vault *readVault(int vfd) {
         return NULL;
     }
     return vault;
+}
+
+int tupleCompare(const void *a, const void *b) {
+    const Tuple at = *(const Tuple *) a;
+    const Tuple bt = *(const Tuple *) b;
+    return (int) (at.offset - bt.offset);
 }
 
 int getFileName(char *fullName, char *trgt) {
@@ -217,28 +178,8 @@ ssize_t formatSize(ssize_t fileSize, char *sizeType) {
     return approxSize;
 }
 
-int listFiles(Vault *vault) {
-
-    if (vault == NULL) {
-        // TODO error message
-        return 0;
-    }
-
-    int width = fileNameMaxWidth(vault), i;
-    // Print list of files in a table format
-    for (i = 0; i < vault->fileMetaData.numberOfFiles; ++i) {
-        char sizeType;
-        ssize_t size = formatSize(vault->files[i].fileSize, &sizeType);
-        printf("%-*s %5zu%c 0%o %s", width + 1, vault->files[i].fileName, size, sizeType,
-               0777 & vault->files[i].fileProtaction,
-               ctime(&vault->files[i].insertionTime));
-    }
-    return 1;
-}
-
 int sortIndexByOffset(Gaps *gap, int *blockIndexes, int numberOfIndexes) {
-    int i, j, tmp;
-
+    int k;
     if (gap == NULL || blockIndexes == NULL) {
         // TODO error message
         return 0;
@@ -248,16 +189,12 @@ int sortIndexByOffset(Gaps *gap, int *blockIndexes, int numberOfIndexes) {
         return 0;
     }
 
-    for (i = 0; i < numberOfIndexes; ++i) {
-        for (j = 0; j < i; j++) {
-            if (gap->gapBlocks[blockIndexes[j + 1]].dataBlockOffset <
-                gap->gapBlocks[blockIndexes[j]].dataBlockOffset) {
-                tmp = blockIndexes[j];
-                blockIndexes[j] = blockIndexes[j + 1];
-                blockIndexes[j + 1] = tmp;
-            }
-        }
+    Tuple tupleArray[3];
+    for (k = 0; k < numberOfIndexes; ++k) {
+        tupleArray->offset = gap->gapBlocks[blockIndexes[k]].dataBlockOffset;
+        tupleArray->index = blockIndexes[k];
     }
+    qsort(tupleArray, (size_t) numberOfIndexes, sizeof(Tuple), tupleCompare);
     return 1;
 }
 
@@ -427,70 +364,6 @@ int mergeGap(Vault *vault, DataBlock *gap, short index) {
     return 0;
 }
 
-int findFile(Vault *vault, char *fileName) {
-    int i;
-
-    if (vault == NULL || fileName == NULL) {
-        // TODO error message
-        return -1;
-    }
-
-    for (i = 0; i < vault->fileMetaData.numberOfFiles; ++i) {
-        if (strcmp(fileName, vault->files[i].fileName) == 0) {
-            return i;
-        }
-    }
-    return -1;
-}
-
-int removeFile(Vault *vault, int vfd, int fileIndex) {
-    short numGap;
-    int i;
-    off_t offset;
-    ssize_t written;
-    FAT file;
-    file = vault->files[fileIndex];
-    for (i = 0; i < file.numberOfPartitons; ++i) {
-
-        offset = lseek(vfd, file.dataBlock[i].dataBlockOffset, SEEK_SET);
-        if (offset != file.dataBlock[i].dataBlockOffset) {
-            // TODO error message
-            return 0;
-        }
-
-        written = write(vfd, ZERO_DELIMITER, 8);
-        if (written != 8) {
-            // TODO error message
-            return 0;
-        }
-
-        lseek(vfd, file.dataBlock[i].dataBlockSize - 16, SEEK_CUR);
-
-        written = write(vfd, ZERO_DELIMITER, 8);
-        if (written != 8) {
-            // TODO error message
-            return 0;
-        }
-
-        // Add removed file as a gap
-        numGap = vault->gaps.numberOfGaps;
-        vault->gaps.totalFreeMemory += file.dataBlock[i].dataBlockSize;
-        vault->gaps.gapBlocks[numGap].dataBlockOffset = file.dataBlock[i].dataBlockOffset;
-        vault->gaps.gapBlocks[numGap].dataBlockSize = file.dataBlock[i].dataBlockSize;
-        vault->gaps.numberOfGaps++;
-
-        // Merge newly created gap if possible
-        mergeGap(vault, &vault->gaps.gapBlocks[numGap], numGap);
-    }
-
-    // Remove from vault files by overriding with last file and update status
-    vault->files[fileIndex] = vault->files[vault->fileMetaData.numberOfFiles - 1];
-    vault->fileMetaData.numberOfFiles--;
-    vault->fileMetaData.lastModificationTime = time(0);
-
-    return 1;
-}
-
 int removeGap(Vault *vault, int gapIndex) {
     if (vault == NULL || gapIndex < 0) {
         // TODO error message
@@ -553,90 +426,6 @@ int writeToBlock(int vfd, int ifd, ssize_t dataToWrite, DataBlock dataBlock) {
     return 1;
 }
 
-int addFile(Vault *vault, int vfd, char *fileName) {
-    int ifd, i, newFileIndex;
-    short numberOfGaps;
-    int blockIndex[3] = {-1, -1, -1};
-    ssize_t blockSizes[3] = {0, 0, 0};
-    ssize_t totalGapsSize = 0;
-    DataBlock gap;
-    char newName[247] = "";
-
-    if (vault == NULL || fileName == NULL) {
-        // TODO error message
-        return -1;
-    }
-
-    // Set newName to be filName without path
-    if (!getFileName(fileName, newName)) {
-        return -1;
-    }
-    // If file name already exists report error
-    if (findFileInVault(vault, newName) != -1) {
-        printf("Unable to add file, file with same name already exists, rename file and add again\n");
-        return 0;
-    }
-
-    struct stat sb;
-    stat(fileName, &sb);
-
-    ifd = open(fileName, O_RDONLY, S_IRUSR | S_IWUSR);
-    if (ifd < 0) {
-        // TODO error message
-        printf("%s\n", "Error in opening");
-        return -1;
-    }
-
-    numberOfGaps = findGaps(blockIndex, blockSizes, &vault->gaps, sb.st_size);
-    if (numberOfGaps == -1) { // Error in finding a gap
-        return -1;
-    } else if (numberOfGaps == 0) {
-        printf("Unable to add file\n");
-        return 0;
-    }
-    newFileIndex = vault->fileMetaData.numberOfFiles;
-    for (i = 0; i < numberOfGaps; i++) {
-        gap = vault->gaps.gapBlocks[blockIndex[i]];
-        if (!writeToBlock(vfd, ifd, blockSizes[i] - 16, gap)) {
-            // TODO error message
-            return -1;
-        }
-
-        vault->files[newFileIndex].dataBlock[i].dataBlockSize = blockSizes[i];
-        vault->files[newFileIndex].dataBlock[i].dataBlockOffset = gap.dataBlockOffset;
-        vault->files[newFileIndex].numberOfPartitons++;
-        totalGapsSize += gap.dataBlockSize;
-
-        if (blockSizes[i] < gap.dataBlockSize && i == numberOfGaps - 1) {
-            vault->gaps.gapBlocks[blockIndex[i]].dataBlockSize = gap.dataBlockSize - blockSizes[i];
-            vault->gaps.gapBlocks[blockIndex[i]].dataBlockOffset += blockSizes[i];
-            break;
-        }
-
-        if (!removeGap(vault, blockIndex[i])) {
-            printf("Error while trying to remove gap\n");
-            return -1;
-        }
-    }
-
-    // Fill new file with input file information and update stats
-    strcpy(vault->files[newFileIndex].fileName, newName);
-    vault->files[newFileIndex].fileProtaction = sb.st_mode;
-    vault->files[newFileIndex].fileSize = sb.st_size + numberOfGaps * FILE_DELIMITER_SIZE;
-    vault->files[newFileIndex].insertionTime = time(0);
-    vault->files[newFileIndex].numberOfPartitons = numberOfGaps;
-    vault->fileMetaData.numberOfFiles++;
-
-    // Update vault stats
-    vault->gaps.totalFreeMemory -= vault->files[newFileIndex].fileSize;
-    vault->fileMetaData.lastModificationTime = time(0);
-
-    close(ifd);
-
-
-    return 1;
-}
-
 int findLastGap(Gaps *gap) {
     int i, maxIndex = -1;
     off_t offset = 0;
@@ -679,10 +468,22 @@ int findFirstGap(Gaps *gap) {
     return minIndex;
 }
 
+short findNearGapIndex(Gaps gap, off_t offset) {
+    short i;
+    for (i = 0; i < gap.numberOfGaps; ++i) {
+        if (gap.gapBlocks[i].dataBlockOffset +
+            gap.gapBlocks[i].dataBlockSize ==
+            offset) {
+            return i;
+        }
+    }
+    return -1;
+}
+
 double getFragmentationRation(Vault *vault) {
     int firstIndex, lastIndex;
     short removeFirst = 0, removeLast = 0;
-    ssize_t consumedMemory = 0;
+    ssize_t consumedMemory = 0, fragmentedMemory = vault->gaps.totalFreeMemory;
     firstIndex = findFirstGap(&vault->gaps);
     lastIndex = findLastGap(&vault->gaps);
 
@@ -705,24 +506,332 @@ double getFragmentationRation(Vault *vault) {
                 vault->gaps.gapBlocks[lastIndex].dataBlockOffset -
                 vault->gaps.gapBlocks[firstIndex].dataBlockSize +
                 vault->gaps.gapBlocks[firstIndex].dataBlockOffset;
+        fragmentedMemory -=
+                vault->gaps.gapBlocks[lastIndex].dataBlockSize +
+                vault->gaps.gapBlocks[firstIndex].dataBlockSize;
+
     } else if (removeFirst) {
         consumedMemory =
                 vault->fileMetaData.vaultSize -
                 vault->gaps.gapBlocks[firstIndex].dataBlockSize +
                 vault->gaps.gapBlocks[firstIndex].dataBlockOffset;
+        fragmentedMemory -=
+                vault->gaps.gapBlocks[firstIndex].dataBlockSize;
     } else if (removeLast) {
         consumedMemory =
                 vault->gaps.gapBlocks[lastIndex].dataBlockOffset -
                 VAULT_SIZE;
+        fragmentedMemory -=
+                vault->gaps.gapBlocks[lastIndex].dataBlockSize;
     } else {
         consumedMemory =
                 vault->fileMetaData.vaultSize -
                 VAULT_SIZE;
     }
-    return consumedMemory / (vault->fileMetaData.vaultSize - VAULT_SIZE);
+    return fragmentedMemory / (double) (consumedMemory);
 
 }
 
+size_t getTotalNumberOfPartitions(Vault *vault) {
+    size_t numOfPartitions = 0;
+    int i;
+
+    if (vault == NULL) {
+        // TODO error message
+        return 0;
+    }
+    for (i = 0; i < vault->fileMetaData.numberOfFiles; ++i) {
+        numOfPartitions += vault->files[i].numberOfPartitons;
+    }
+    return numOfPartitions;
+}
+
+long getSizeFromString(char *string) {
+    long size;
+    char type;
+    if (string == NULL) {
+        // TODO error message
+        return -1;
+    }
+    // Read data from string
+    if (sscanf(string, "%ld%c", &size, &type) != 2) {
+        printf("Error - Invalid data formant was entered\n");
+        return -1;
+    }
+    // Calculate data size
+    if (type == 'B')
+        return size;
+    else if (type == 'K')
+        return size * K;
+    else if (type == 'M')
+        return size * M;
+    else if (type == G)
+        return size * G;
+    printf("Error - Unknown data type was entered\n");
+    return -1;
+}
+
+char toLowercase(char i) {
+    if ('A' <= i && i <= 'Z')
+        return i + (char) ('a' - 'A');
+    return i;
+}
+
+ssize_t init(int vfd, long dataSize) {
+    ssize_t written;
+    off_t offset;
+    Vault *vault;
+
+    if (dataSize < VAULT_SIZE) {
+        printf("Error - Entered vault size isn't large enough\n");
+        return 0;
+    }
+
+    vault = malloc(VAULT_SIZE);
+    // Add File meta data
+    vault->fileMetaData.vaultSize = dataSize;
+    vault->fileMetaData.creationTime = time(0);
+    vault->fileMetaData.lastModificationTime = vault->fileMetaData.creationTime;
+    vault->fileMetaData.numberOfFiles = 0;
+
+    // Add gap data
+    vault->gaps.totalFreeMemory = dataSize - VAULT_SIZE;
+    vault->gaps.numberOfGaps = 1;
+    vault->gaps.gapBlocks[0].dataBlockSize = dataSize - VAULT_SIZE;
+    vault->gaps.gapBlocks[0].dataBlockOffset = VAULT_SIZE;
+
+    // Create file of size dataSize using lseek
+    written = write(vfd, "#", 1);
+    if (written < 0) {
+        // TODO error message
+        return 0;
+    }
+
+    offset = lseek(vfd, dataSize - 1, SEEK_SET);
+    if (offset == -1 || offset != dataSize - 1) {
+        // TODO error message
+        return 0;
+    }
+
+    written = write(vfd, "#", 1);
+    if (written < 0) {
+        // TODO error message
+        return 0;
+    }
+
+    offset = lseek(vfd, 0, SEEK_SET);
+    if (offset != 0) {
+        // TODO error message
+        return 0;
+    }
+
+    written = write(vfd, vault, VAULT_SIZE);
+    if (written != VAULT_SIZE) {
+        // TODO error message
+        return 0;
+    }
+
+    free(vault);
+    printf("Result: A vault created");
+    return 1;
+}
+
+int addFile(Vault *vault, int vfd, char *fileName) {
+    int ifd, i, newFileIndex;
+    short numberOfGaps;
+    int blockIndex[3] = {-1, -1, -1};
+    ssize_t blockSizes[3] = {0, 0, 0};
+    ssize_t totalGapsSize = 0;
+    DataBlock gap;
+    char newName[247] = "";
+
+    if (vault == NULL || fileName == NULL) {
+        // TODO error message
+        return 0;
+    }
+
+    // Max number of files is 100
+    if (vault->fileMetaData.numberOfFiles == 100) {
+        printf("Error - Can't add more files to vault, delete some files and try again");
+        return 0;
+    }
+
+    // Set newName to be filName without path
+    if (!getFileName(fileName, newName)) {
+        return 0;
+    }
+    // If file name already exists report error
+    if (findFileInVault(vault, newName) != -1) {
+        printf("Unable to add file, file with same name already exists, rename file and add again\n");
+        return 0;
+    }
+
+    struct stat sb;
+    stat(fileName, &sb);
+
+    ifd = open(fileName, O_RDONLY, S_IRUSR | S_IWUSR);
+    if (ifd < 0) {
+        // TODO error message
+        printf("%s\n", "Error in opening");
+        return 0;
+    }
+
+    numberOfGaps = findGaps(blockIndex, blockSizes, &vault->gaps, sb.st_size);
+    if (numberOfGaps == -1) { // Error in finding a gap
+        return 0;
+    } else if (numberOfGaps == 0) {
+        printf("Unable to add file, no valid partition exists\n");
+        return 0;
+    }
+    newFileIndex = vault->fileMetaData.numberOfFiles;
+    for (i = 0; i < numberOfGaps; i++) {
+        gap = vault->gaps.gapBlocks[blockIndex[i]];
+        if (!writeToBlock(vfd, ifd, blockSizes[i] - 16, gap)) {
+            // TODO error message
+            return -1;
+        }
+
+        // Adding file to vault
+        vault->files[newFileIndex].dataBlock[i].dataBlockSize = blockSizes[i];
+        vault->files[newFileIndex].dataBlock[i].dataBlockOffset = gap.dataBlockOffset;
+        vault->files[newFileIndex].numberOfPartitons++;
+        totalGapsSize += gap.dataBlockSize;
+
+        // If last gap isn't fully used create new gap with what left
+        if (blockSizes[i] < gap.dataBlockSize && i == numberOfGaps - 1) {
+            vault->gaps.gapBlocks[blockIndex[i]].dataBlockSize = gap.dataBlockSize - blockSizes[i];
+            vault->gaps.gapBlocks[blockIndex[i]].dataBlockOffset += blockSizes[i];
+            break;
+        }
+
+        if (!removeGap(vault, blockIndex[i])) {
+            printf("Error while trying to remove gap\n");
+            return -1;
+        }
+    }
+
+    // Fill new file with input file information and update stats
+    strcpy(vault->files[newFileIndex].fileName, newName);
+    vault->files[newFileIndex].fileProtaction = sb.st_mode;
+    vault->files[newFileIndex].fileSize = sb.st_size + numberOfGaps * FILE_DELIMITER_SIZE;
+    vault->files[newFileIndex].insertionTime = time(0);
+    vault->files[newFileIndex].numberOfPartitons = numberOfGaps;
+    vault->fileMetaData.numberOfFiles++;
+
+    // Update vault stats
+    vault->gaps.totalFreeMemory -= vault->files[newFileIndex].fileSize;
+    vault->fileMetaData.lastModificationTime = time(0);
+    close(ifd);
+
+    printf("Result: %s inserted\n", newName);
+    return 1;
+}
+
+int removeFile(Vault *vault, int vfd, int fileIndex) {
+    short numGap;
+    int i;
+    off_t offset;
+    ssize_t written;
+    FAT file;
+    file = vault->files[fileIndex];
+    for (i = 0; i < file.numberOfPartitons; ++i) {
+
+        offset = lseek(vfd, file.dataBlock[i].dataBlockOffset, SEEK_SET);
+        if (offset != file.dataBlock[i].dataBlockOffset) {
+            // TODO error message
+            return 0;
+        }
+
+        written = write(vfd, ZERO_DELIMITER, 8);
+        if (written != 8) {
+            // TODO error message
+            return 0;
+        }
+
+        lseek(vfd, file.dataBlock[i].dataBlockSize - 16, SEEK_CUR);
+
+        written = write(vfd, ZERO_DELIMITER, 8);
+        if (written != 8) {
+            // TODO error message
+            return 0;
+        }
+
+        // Add removed file as a gap
+        numGap = vault->gaps.numberOfGaps;
+        vault->gaps.totalFreeMemory += file.dataBlock[i].dataBlockSize;
+        vault->gaps.gapBlocks[numGap].dataBlockOffset = file.dataBlock[i].dataBlockOffset;
+        vault->gaps.gapBlocks[numGap].dataBlockSize = file.dataBlock[i].dataBlockSize;
+        vault->gaps.numberOfGaps++;
+
+        // Merge newly created gap if possible
+        if (mergeGap(vault, &vault->gaps.gapBlocks[numGap], numGap) == -1) {
+            // TODO error message
+            return 0;
+        }
+    }
+
+    // Remove from vault files by overriding with last file and update status
+    vault->files[fileIndex] = vault->files[vault->fileMetaData.numberOfFiles - 1];
+    vault->fileMetaData.numberOfFiles--;
+    vault->fileMetaData.lastModificationTime = time(0);
+
+    printf("Result: %s deleted", file.fileName);
+    return 1;
+}
+
+int fetchFile(Vault *vault, int vfd, int fileIndex) {
+    char *buf;
+    ssize_t readBufferSize;
+    ssize_t writeSize, written, readNumber;
+    FAT file;
+    int i;
+
+    if (vault == NULL) {
+        // TODO error message
+        return 0;
+    }
+    if (fileIndex < 0) {
+        // TODO error message
+        return 0;
+    }
+    buf = malloc(BUFFER_SIZE);
+    if (buf == NULL) {
+        // TODO error message
+        return 0;
+    }
+
+    // TODO add permissions check
+
+    file = vault->files[fileIndex];
+    int ofd = open(file.fileName, O_WRONLY | O_CREAT | O_TRUNC, file.fileProtaction);
+    if (ofd < 0) {
+        // TODO error message
+        return 0;
+    }
+
+    for (i = 0; i < file.numberOfPartitons; ++i) {
+        lseek(vfd, file.dataBlock[i].dataBlockOffset + 8, SEEK_SET);
+        writeSize = file.dataBlock[i].dataBlockSize - 16;
+        while (writeSize > 0) {
+            readBufferSize = min(writeSize, BUFFER_SIZE);
+            readNumber = read(vfd, buf, (size_t) readBufferSize);
+            if (readNumber < 0) {
+                // TODO error message
+                return 0;
+            }
+            written = write(ofd, buf, (size_t) readBufferSize);
+            if (written != readBufferSize) {
+                // TODO error message
+                return 0;
+            }
+            writeSize -= written;
+        }
+    }
+    free(buf);
+    close(ofd);
+    printf("Result: %s created", vault->files[fileIndex].fileName);
+    return 1;
+}
 
 int status(Vault *vault) {
     if (vault == NULL) {
@@ -743,109 +852,166 @@ int status(Vault *vault) {
     return 1;
 }
 
-int fetchFile(Vault *vault, int vfd, int fileIndex) {
+int list(Vault *vault) {
+
     if (vault == NULL) {
         // TODO error message
         return 0;
     }
-    if (fileIndex < 0) {
-        // TODO error message
-        return 0;
-    }
-    char *buffer;
-    ssize_t readBufferSize;
-    ssize_t writeSize, written, readNumber;
-    FAT file;
-    int i;
-    buffer = malloc(BUFFER_SIZE);
-    if (buffer == NULL) {
-        // TODO error message
-        return 0;
-    }
 
-    // TODO add permissions check
-
-    file = vault->files[fileIndex];
-    int ofd = open(file.fileName, O_WRONLY | O_CREAT | O_TRUNC, file.fileProtaction);
-    if (ofd < 0) {
-        // TODO error message
-        return 0;
+    int width = fileNameMaxWidth(vault), i;
+    // Print list of files in a table format
+    for (i = 0; i < vault->fileMetaData.numberOfFiles; ++i) {
+        char sizeType;
+        ssize_t size = formatSize(vault->files[i].fileSize, &sizeType);
+        printf("%-*s %5zu%c 0%o %s", width + 1, vault->files[i].fileName, size, sizeType,
+               0777 & vault->files[i].fileProtaction,
+               ctime(&vault->files[i].insertionTime));
     }
-
-    for (i = 0; i < file.numberOfPartitons; ++i) {
-        lseek(vfd, file.dataBlock[i].dataBlockOffset + 8, SEEK_SET);
-        writeSize = file.dataBlock[i].dataBlockSize - 16;
-        while (writeSize > 0) {
-            readBufferSize = min(writeSize, BUFFER_SIZE);
-            readNumber = read(vfd, buffer, (size_t) readBufferSize);
-            if (readNumber < 0) {
-                // TODO error message
-                return 0;
-            }
-            written = write(ofd, buffer, (size_t) readBufferSize);
-            if (written != readBufferSize) {
-                // TODO error message
-                return 0;
-            }
-            writeSize -= written;
-        }
-    }
-    close(ofd);
+    // Update file modification time
+    vault->fileMetaData.lastModificationTime = time(0);
     return 1;
 }
 
-int findNearGapIndex(Gaps gap, off_t offset) {
-    int i;
-    for (i = 0; i < gap.numberOfGaps; ++i) {
-        if (gap.gapBlocks[i].dataBlockOffset +
-            gap.gapBlocks[i].dataBlockSize ==
-            offset) {
-            return i;
-        }
-    }
-    return -1;
-}
-
-int defrag(Vault *vault, int vfd) {
-
+int defragmentation(Vault *vault, int vfd) {
+    FAT file;
+    ssize_t written, readNumber, dataToWrite;
+    size_t bufSize;
+    off_t readOffset, writeOffset;
+    int i, j, k = 0;
+    short gapIndex;
+    size_t numOfPartitions;
+    char *buf;
+    char mergeFlag;
     // TODO error messages
 
-    FAT file;
-    ssize_t written, readNumber;
-    int i, j, gapIndex/*, partitionIndex*/;
+
+    // Create and fill array of all offsets, then sort them according to offset
+    numOfPartitions = getTotalNumberOfPartitions(vault);
+    Tuple *tupleArray = malloc(numOfPartitions * sizeof(Tuple));
+    if (tupleArray == NULL) {
+        // TODO error message
+        return 0;
+    }
     for (i = 0; i < vault->fileMetaData.numberOfFiles; ++i) {
+        for (j = 0; j < vault->files[i].numberOfPartitons; ++j) {
+            tupleArray[k].index = i;
+            tupleArray[k++].offset = vault->files[i].dataBlock[j].dataBlockOffset;
+        }
+    }
+    qsort(tupleArray, numOfPartitions, sizeof(Tuple), tupleCompare);
 
-        file = vault->files[i];
-        for (j = 0; j < file.numberOfPartitons; ++j) {
-            printf("Offset of partition   - %zu\n", file.dataBlock[j].dataBlockOffset);
-            // Find if gap exists next to file data block
-            gapIndex = findNearGapIndex(vault->gaps, file.dataBlock[i].dataBlockOffset);
-            if (gapIndex != -1 && j > 0) {
-                // Remove start and end delimiter
+    buf = malloc(BUFFER_SIZE);
+    if (buf == NULL) {
+        // TODO error message
+        return 0;
+    }
 
-                lseek(vfd, file.dataBlock[j].dataBlockOffset , SEEK_SET);
-                written = write(vfd, ZERO_DELIMITER, 8);
-                if (written != 8) {
-                    // TODO error message
-                    return 0;
-                }
-                lseek(vfd, file.dataBlock[j].dataBlockSize - 16, SEEK_CUR);
-                written = write(vfd, ZERO_DELIMITER, 8);
-                if (written != 8) {
-                    // TODO error message
-                    return 0;
-                }
+    for (i = 0; i < numOfPartitions; ++i) {
+        mergeFlag = 0;
+        file = vault->files[tupleArray[i].index];
+        gapIndex = findNearGapIndex(vault->gaps, tupleArray[i].offset);
+        if (gapIndex != -1) {
+            // Go to the start of the DataBlock
+            lseek(vfd, tupleArray[i].offset, SEEK_SET);
+            // Remove start delimiter
+            written = write(vfd, ZERO_DELIMITER, 8);
+            if (written != 8) {
+                // TODO error message
+                return 0;
+            }
+            // Find partition index with offset
+            for (j = 0; j < file.numberOfPartitons; ++j)
+                if (tupleArray[i].offset == file.dataBlock[j].dataBlockOffset)
+                    break;
+            lseek(vfd, file.dataBlock[j].dataBlockSize - 16, SEEK_CUR);
+            // Remove end delimiter
+            written = write(vfd, ZERO_DELIMITER, 8);
+            if (written != 8) {
+                // TODO error message
+                return 0;
+            }
 
-                
-
+            if (j > 0) {
+                // Find if DataBlocks can be merged
                 if (file.dataBlock[j - 1].dataBlockOffset +
                     vault->gaps.gapBlocks[gapIndex].dataBlockSize ==
                     file.dataBlock[j].dataBlockOffset) {
+                    mergeFlag ^= 1;
+                    // Remove end delimiter of previous DataBlock
+                    lseek(vfd, file.dataBlock[j - 1].dataBlockOffset +
+                               file.dataBlock[j - 1].dataBlockSize - 8, SEEK_CUR);
+                    written = write(vfd, ZERO_DELIMITER, 8);
+                    if (written != 8) {
+                        // TODO error message
+                        return 0;
+                    }
                 }
+            }
+
+            // Move to start of gap
+            writeOffset = lseek(vfd, vault->gaps.gapBlocks[gapIndex].dataBlockOffset, SEEK_SET);
+
+            // Move DataBlock to new location
+            // If no merge is needed then add start delimiter
+            if (!mergeFlag) {
+                written = write(vfd, START_DELIMITER, 8);
+                if (written != 8) {
+                    // TODO error message
+                    return 0;
+                }
+                writeOffset += 8;
+            } else
+                writeOffset -= 8;
+
+            dataToWrite = file.dataBlock[j].dataBlockSize - 16;
+            readOffset = file.dataBlock[j].dataBlockOffset + 8;
+            while (dataToWrite > 0) {
+                bufSize = (size_t) (min(dataToWrite, BUFFER_SIZE));
+
+                // Jump to reading position and read
+                lseek(vfd, readOffset, SEEK_SET);
+                readNumber = read(vfd, buf, bufSize);
+                if (readNumber < 0) {
+                    // TODO error message
+                    return 0;
+                }
+                readOffset += readNumber;
+
+                // Jump to writing position and write
+                lseek(vfd, writeOffset, SEEK_SET);
+                written = write(vfd, buf, bufSize);
+                if (written != bufSize) {
+                    // TODO error message
+                    return 0;
+                }
+                writeOffset += written;
+
+                dataToWrite -= written;
+            }
+            written = write(vfd, END_DELIMITER, 8);
+            if (written != 8) {
+                // TODO error message
+                return 0;
+            }
+
+            // Update gap position and size
+            vault->gaps.gapBlocks[gapIndex].dataBlockOffset = writeOffset + 8;
+            if (mergeFlag) {
+                vault->gaps.gapBlocks[gapIndex].dataBlockSize += FILE_DELIMITER_SIZE;
+            }
+
+            // Merge gaps if needed
+            if (mergeGap(vault, &vault->gaps.gapBlocks[gapIndex], gapIndex) == -1) {
+                // TODO error message
+                return 0;
             }
         }
     }
-
+    free(tupleArray);
+    free(buf);
+    printf("Result: Defragmentation complete\n");
+    return 1;
 
 }
 
@@ -853,115 +1019,155 @@ int main(int argc, char **argv) {
     struct timeval start, end;
     long seconds, useconds;
     double mtime;
-
+    int vfd, index;
+    int errorFlag = 0;
+    long vaultSize = 0;
+    char *vaultName, *opName, *p;
 
     // start time measurement
     gettimeofday(&start, NULL);
 
-/*
 
-    int fd = open("test.vlt", O_WRONLY | O_CREAT | O_TRUNC, S_IWUSR | S_IRUSR);
-    init(fd, 5 * VAULT_SIZE);
-    close(fd);
-
-
-    fd = open("test.vlt", O_RDWR);
-    Vault *vault = readVault(fd);
-
-    printf("Add file - files/input.txt\n");
-    addFile(vault, fd, "files/input.txt");
-
-    listFiles(vault);
-
-    printf("Add file - files/input2.txt\n");
-    addFile(vault, fd, "files/input2.txt");
-
-    listFiles(vault);
-
-    printf("Add file - files/input.txt\n");
-    addFile(vault, fd, "files/input.txt");
-
-    listFiles(vault);
-
-    printf("Remove file - input2.txt\n");
-    int index = findFileInVault(vault, "input2.txt");
-    removeFile(vault, fd, index);
-
-    printf("\nAdd file - files/input5.txt\n");
-    addFile(vault, fd, "files/input5.txt");
-
-    listFiles(vault);
-
-    printf("Add file - files/input2.txt\n");
-    addFile(vault, fd, "files/input2.txt");
-
-    listFiles(vault);
-
-
-    printf("\nAdd file - files/input4.txt\n");
-    addFile(vault, fd, "files/input4.txt");
-
-
-    printf("\nAdd file - files/input3.txt\n");
-    addFile(vault, fd, "files/input3.txt");
-
-    printf("\nRemove file - input2.txt\n");
-    index = findFileInVault(vault, "input2.txt");
-    removeFile(vault, fd, index);
-
-    printf("\nRemove file - input4.txt\n");
-    index = findFileInVault(vault, "input4.txt");
-    removeFile(vault, fd, index);
-
-
-    printf("\nAdd file - files/input4.txt\n");
-    addFile(vault, fd, "files/input4.txt");
-
-    printf("\nAdd file - files/input5.txt\n");
-    addFile(vault, fd, "files/input5.txt");
-
-    printf("\nAdd file - files/input1.txt\n");
-    addFile(vault, fd, "files/input1.txt");
-
-    printf("\nAdd file - files/empty_file.txt\n");
-    addFile(vault, fd, "files/empty_file.txt");
-
-    printf("\nRemove file - input3.txt\n");
-    index = findFileInVault(vault, "input3.txt");
-    removeFile(vault, fd, index);
-
-    printf("\nAdd file - files/input3.txt\n");
-    addFile(vault, fd, "files/input3.txt");
-
-
-    printf("\nFetch - input3.txt\n");
-    index = findFileInVault(vault, "input3.txt");
-    fetchFile(vault, fd, index);
-
-    index = findFileInVault(vault, "input5.txt");
-    removeFile(vault, fd, index);
-
-    printf("\nStatus\n");
-    status(vault);
-
-
-    if (!saveVaultToFile(vault, fd)) {
-        printf("LOL1");
-    }
-    free(vault);
-    close(fd);
-
-    fd = open("test.vlt", O_RDWR);
-    vault = readVault(fd);
-    printf("list files\n");
-    if (!listFiles(vault)) {
-        printf("error in \n");
+    if (argc > 4 || 3 > argc) {
+        printf("Error - Invalid number of arguments\n");
+        return -1;
     }
 
-    close(fd);
-    free(vault);
-*/
+    // TODO find how to change to lowercase
 
+    vaultName = argv[1];
+    opName = argv[2];
+
+    // Make opName to be lowercase only
+    // Credit to J.F. Sebastian - Stackoverflow.com
+    // http://stackoverflow.com/questions/2661766/c-convert-a-mixed-case-string-to-all-lower-case#comment2679128_2661788
+    p = opName;
+    for (; *p; ++p) *p = toLowercase(*p);
+
+
+    if (strcmp(opName, "init") == 0) {
+        vfd = open(vaultName, O_WRONLY | O_CREAT | O_TRUNC, S_IWUSR | S_IRUSR);
+        if (vfd < 0) {
+            printf("Error - Failed to create a vault file\n");
+            errorFlag = -1;
+        } else {
+            vaultSize = getSizeFromString(argv[4]);
+            if (!init(vfd, vaultSize))
+                errorFlag = -1;
+        }
+        close(vfd);
+    } else if (strcmp(opName, "list") == 0) {
+        vfd = open(vaultName, O_RDWR, S_IWUSR | S_IRUSR | S_IRGRP | S_IROTH);
+        if (vfd < 0) {
+            printf("Error - Failed to open vault file\n");
+            errorFlag = -1;
+        } else {
+            Vault *vault = readVault(vfd);
+            if (vault != NULL) {
+                if (!list(vault)) {
+                    errorFlag = -1;
+                }
+            } else
+                errorFlag = -1;
+        }
+        close(vfd);
+    } else if (strcmp(opName, "add") == 0) {
+        vfd = open(vaultName, O_RDWR, S_IWUSR | S_IRUSR | S_IRGRP | S_IROTH);
+        if (vfd < 0) {
+            printf("Error - Failed to open vault file\n");
+            errorFlag = -1;
+        } else {
+            Vault *vault = readVault(vfd);
+            if (vault != NULL) {
+                errorFlag = addFile(vault, vfd, argv[3]);
+                if (errorFlag < 0) {
+                    errorFlag = -1;
+                } else if (!errorFlag) {
+
+                } else if (!saveVaultToFile(vault, vfd)) {
+                    errorFlag = -1;
+                }
+            } else
+                errorFlag = -1;
+        }
+        close(vfd);
+    } else if (strcmp(opName, "rm") == 0) {
+        vfd = open(vaultName, O_RDWR, S_IWUSR | S_IRUSR | S_IRGRP | S_IROTH);
+        if (vfd < 0) {
+            printf("Error - Failed to open vault file\n");
+            errorFlag = -1;
+        } else {
+            Vault *vault = readVault(vfd);
+            if (vault != NULL) {
+                index = findFileInVault(vault, argv[3]);
+                if (index == -1) {
+                    printf("Error - File does not exist in the vault\n");
+                    errorFlag = -1;
+                } else if (!removeFile(vault, vfd, index)) {
+                    errorFlag = -1;
+                } else if (!saveVaultToFile(vault, vfd)) {
+                    errorFlag = -1;
+                }
+            } else
+                errorFlag = -1;
+        }
+        close(vfd);
+    } else if (strcmp(opName, "fetch") == 0) {
+        vfd = open(vaultName, O_RDWR, S_IWUSR | S_IRUSR | S_IRGRP | S_IROTH);
+        if (vfd < 0) {
+            printf("Error - Failed to open vault file\n");
+            errorFlag = -1;
+        } else {
+            Vault *vault = readVault(vfd);
+            if (vault != NULL) {
+                index = findFileInVault(vault, argv[3]);
+                if (index == -1) {
+                    printf("Error - File does not exist in the vault\n");
+                    errorFlag = -1;
+                } else if (!fetchFile(vault, vfd, index)) {
+                    errorFlag = -1;
+                } else if (!saveVaultToFile(vault, vfd)) {
+                    errorFlag = -1;
+                }
+            } else
+                errorFlag = -1;
+        }
+        close(vfd);
+    } else if (strcmp(opName, "defrag") == 0) {
+        vfd = open(vaultName, O_RDWR, S_IWUSR | S_IRUSR | S_IRGRP | S_IROTH);
+        if (vfd < 0) {
+            printf("Error - Failed to open vault file\n");
+            errorFlag = -1;
+        } else {
+            Vault *vault = readVault(vfd);
+            if (vault != NULL) {
+                if (!defragmentation(vault, vfd)) {
+                    errorFlag = -1;
+                } else if (!saveVaultToFile(vault, vfd)) {
+                    errorFlag = -1;
+                }
+            } else
+                errorFlag = -1;
+        }
+        close(vfd);
+    } else if (strcmp(opName, "status") == 0) {
+        vfd = open(vaultName, O_RDWR, S_IWUSR | S_IRUSR | S_IRGRP | S_IROTH);
+        if (vfd < 0) {
+            printf("Error - Failed to open vault file\n");
+            errorFlag = -1;
+        } else {
+            Vault *vault = readVault(vfd);
+            if (vault != NULL) {
+                if (!status(vault)) {
+                    errorFlag = -1;
+                }
+            } else
+                errorFlag = -1;
+        }
+        close(vfd);
+    } else {
+        printf("Unknown operation\n");
+    }
 
     // end time measurement and print result
     gettimeofday(&end, NULL);
@@ -971,5 +1177,5 @@ int main(int argc, char **argv) {
 
     mtime = ((seconds) * 1000 + useconds / 1000.0);
     printf("Elapsed time: %.3f milliseconds\n", mtime);
-    return 0;
+    return errorFlag;
 }
