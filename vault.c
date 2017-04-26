@@ -1094,13 +1094,12 @@ int main(int argc, char **argv) {
                 Vault *vault = readVault(vfd);
                 if (vault != NULL) {
                     errorFlag = addFile(vault, vfd, argv[3]);
-                    if (errorFlag < 0) {
+                    if (errorFlag < 0)
                         errorFlag = -1;
-                    } else if (!errorFlag) {
-
-                    } else if (!saveVaultToFile(vault, vfd)) {
+                    else if (!errorFlag)
                         errorFlag = -1;
-                    }
+                    else if (!saveVaultToFile(vault, vfd))
+                        errorFlag = -1;
                 } else
                     errorFlag = -1;
             }
