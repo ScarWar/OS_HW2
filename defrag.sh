@@ -21,8 +21,5 @@ $exeFile vault.vlt rm "6.txt"
 $exeFile vault.vlt rm "8.txt"
 $exeFile vault.vlt add "files/9.txt"
 $exeFile vault.vlt fetch "9.txt"
-assertNull $(diff "9.txt" "files/9.txt")
-echo $(diff "9.txt" "files/9.txt")
-assertNotSame "0" $?
 $exeFile vault.vlt list
 $exeFile vault.vlt defrag
